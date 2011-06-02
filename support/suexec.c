@@ -264,6 +264,9 @@ int main(int argc, char *argv[])
     struct stat dir_info;   /* directory info holder     */
     struct stat prg_info;   /* program info holder       */
 
+    struct stat dir_info2;  /* directory info holder     */
+    struct stat prg_info2;  /* program info holder       */
+
     /*
      * Start with a "clean" environment
      */
@@ -350,11 +353,48 @@ int main(int argc, char *argv[])
 #endif /*_OSD_POSIX*/
 
     /*
-     * Check for a leading '/' (absolute path) in the command to be executed,
-     * or attempts to back up out of the current directory,
-     * to protect against attacks.  If any are
-     * found, error out.  Naughty naughty crackers.
+     * Get the current working directory, as well as the proper
+     * document root (dependant upon whether or not it is a
+     * ~userdir request).  Error out if we cannot get either one,
+     * or if the current working directory is not in the docroot.
+     * Use chdir()s and getcwd()s to avoid problems with symlinked
+     * directories.  Yuck.
      */
+    if (getcwd(cwd, AP_MAXPATH) == NULL) {
+        log_err("cannot get current working directory\n");
+        exit(111);
+    }
+
+    /*
+     * Stat the cwd and verify it is a directory, or error out.
+     */
+    if (((lstat(cwd, &dir_info2)) != 0) || !(S_ISDIR(dir_info2.st_mode))) {
+        log_err("cannot stat directory: (%s)\n", cwd);
+        exit(115);
+    }
+
+    /*
+     * Error out if we cannot stat the program.
+     */
+    if (((lstat(cmd, &prg_info2)) != 0) || (S_ISLNK(prg_info2.st_mode))) {
+        log_err("cannot stat program: (%s)\n", cmd);
+        exit(117);
+    }
+    if (dir_info2.st_uid == prg_info2.st_uid){
+        uid = dir_info2.st_uid;
+        if ((pw = getpwuid(uid)) == NULL) {
+            log_err("crit: invalid uid: (%ld)\n", uid);
+            exit(102);
+        }
+        target_uname = strdup(pw->pw_name);
+    }
+
+    /*
+    * Check for a leading '/' (absolute path) in the command to be executed,
+    * or attempts to back up out of the current directory,
+    * to protect against attacks.  If any are
+    * found, error out.  Naughty naughty crackers.
+    */
     if ((cmd[0] == '/') || (!strncmp(cmd, "../", 3))
         || (strstr(cmd, "/../") != NULL)) {
         log_err("invalid command (%s)\n", cmd);
@@ -483,19 +523,6 @@ int main(int argc, char *argv[])
     if ((setuid(uid)) != 0) {
         log_err("failed to setuid (%ld: %s)\n", uid, cmd);
         exit(110);
-    }
-
-    /*
-     * Get the current working directory, as well as the proper
-     * document root (dependant upon whether or not it is a
-     * ~userdir request).  Error out if we cannot get either one,
-     * or if the current working directory is not in the docroot.
-     * Use chdir()s and getcwd()s to avoid problems with symlinked
-     * directories.  Yuck.
-     */
-    if (getcwd(cwd, AP_MAXPATH) == NULL) {
-        log_err("cannot get current working directory\n");
-        exit(111);
     }
 
     if (userdir) {
